@@ -31,14 +31,13 @@ login_manager.init_app(app)
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+def check_owner(post_id):
+    owner = BlogPost.query.get(post_id).author
+    if current_user.id !=1  and current_user !=owner :
+        return False
+    return True
 
-def admin_only(inner_function):
-    @wraps(inner_function)
-    def decorated_function(*args, **kwargs):
-        if current_user.id != 1:
-            return abort(403)
-        return inner_function(*args,**kwargs)
-    return decorated_function
+
 
 class Comment(db.Model):
     __tablename__ = "comments"
@@ -80,11 +79,13 @@ with app.app_context():
 @app.route('/')
 def get_all_posts():
     admin = False
+    is_login=False
     if current_user.is_authenticated:
+        is_login = True
         if current_user.id == 1:
             admin = True
     posts = BlogPost.query.all()
-    return render_template("index.html", all_posts=posts ,is_admin = admin)
+    return render_template("index.html", all_posts=posts ,is_admin = admin,is_login=is_login, current_user=current_user)
 
 
 @app.route('/register', methods = ['POST','GET'])
@@ -137,8 +138,11 @@ def logout():
     logout_user()
     return redirect(url_for('get_all_posts'))
 
+
 @app.route("/post/<int:post_id>",methods=['POST','GET'])
+@login_required
 def show_post(post_id):
+    is_admin = check_owner(post_id)
     with app.app_context():
         comments = Comment.query.filter_by(post_id =post_id)
         form = CommentForm()
@@ -150,7 +154,7 @@ def show_post(post_id):
             db.session.add(new_comment)
             db.session.commit()
     
-        return render_template("post.html", post=requested_post, form=form, comments = comments)
+        return render_template("post.html", post=requested_post, form=form, comments = comments,is_admin = is_admin)
 
 
 @app.route("/about")
@@ -165,7 +169,6 @@ def contact():
 
 @app.route("/new-post",methods =['POST','GET'])
 @login_required
-@admin_only
 def add_new_post():
     form = CreatePostForm()
     if form.validate_on_submit():
@@ -185,12 +188,11 @@ def add_new_post():
 
 @app.route("/edit-post/<int:post_id>",methods =['POST','GET'])
 @login_required
-@admin_only
 def edit_post(post_id):
+    is_admin = check_owner(post_id)
+    if not is_admin:
+        return abort(403)
     admin = False
-    if current_user.is_authenticated:
-        if current_user.id == 1:
-            admin = True
     post = BlogPost.query.get(post_id)
     edit_form = CreatePostForm(
         title=post.title,
@@ -203,7 +205,7 @@ def edit_post(post_id):
         post.title = edit_form.title.data
         post.subtitle = edit_form.subtitle.data
         post.img_url = edit_form.img_url.data
-        post.author = edit_form.author.data
+        post.author = current_user
         post.body = edit_form.body.data
         db.session.commit()
         return redirect(url_for("show_post", post_id=post.id))
@@ -213,8 +215,10 @@ def edit_post(post_id):
 
 @app.route("/delete/<int:post_id>")
 @login_required
-@admin_only
 def delete_post(post_id):
+    is_admin = check_owner(post_id)
+    if not is_admin:
+        return abort(403)
     post_to_delete = BlogPost.query.get(post_id)
     db.session.delete(post_to_delete)
     db.session.commit()
